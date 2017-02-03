@@ -8,10 +8,15 @@ import (
 	"encoding/json"
 	"time"
 	"net/http"
-//	"database/sql"
-//	_ "github.com/mattn/go-sqlite3"
+	"database/sql"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/gorilla/websocket"
+	"golang.org/x/crypto/bcrypt"
 )
+type Status struct {
+	Error bool
+	Message string
+}
 type EmailRequest struct {
 	Addr string
 }
@@ -54,7 +59,7 @@ func (t *Tracker) run(){
 	}
 }
 
-func (c *Client) readPump(){
+func (c *Client) readPump(db *sql.DB){
 	defer func(){
 		c.tracker.unregister <-c
 		c.conn.Close()
@@ -75,7 +80,50 @@ func (c *Client) readPump(){
 		auth := new(UserAuth)
 		authErr := json.Unmarshal([]byte(message),auth)
 		if authErr == nil {
-			//TODO: check db for login
+			rows, err := db.Query("SELECT password FROM users WHERE username=?", auth.Username)
+			if err != nil {
+				status:=new(Status)
+				status.Error=true
+				status.Message="Unable to login"
+				json,_:=json.Marshal(status)
+				c.send<-json
+				fmt.Println(err)
+				continue
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var password string
+				err := rows.Scan(&password)
+				if err != nil {
+					status:=new(Status)
+					status.Error=true
+					status.Message="Unable to login"
+					json,_:=json.Marshal(status)
+					c.send<-json
+					fmt.Println(err)
+					continue
+				}
+				err = bcrypt.CompareHashAndPassword([]byte(password),[]byte(auth.Password))
+				if err != nil {
+					status:=new(Status)
+					status.Error=true
+					status.Message="Unable to login"
+					json,_:=json.Marshal(status)
+					c.send<-json
+					fmt.Println(err)
+					continue
+				}
+			}
+			err=rows.Err()
+			if err != nil {
+				status:=new(Status)
+				status.Error=true
+				status.Message="Unable to login"
+				json,_:=json.Marshal(status)
+				c.send<-json
+				fmt.Println(err)
+				continue
+			}
 			c.username=auth.Username
 			continue
 		}
@@ -104,27 +152,47 @@ func (c *Client) readPump(){
 		if msg != nil {
 			if checkMessage(msg) {
 				//TODO: allow multchat
-				//TODO: pull keys from database
-				keys:=[2]string{"90636FD8C5C8B273","030E11640B5F1EA1"}
-				for _,key := range keys {
+				rows, err := db.Query("SELECT username,key FROM users WHERE username=? OR username=?", msg.From.Name+"@"+msg.From.Domain, msg.To.Name+"@"+msg.To.Domain)
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+				defer rows.Close()
+				for rows.Next() {
+					var key string
+					var username string
+					err := rows.Scan(&username,&key)
+					if err != nil {
+						fmt.Println(err)
+						continue
+					}
 					if msg.To.Key == key {
-						for client,_ := range c.tracker.clients {
-							if client.username == msg.From.Name+"@"+msg.From.Domain {
+						for client,_ := range c.tracker.clients{
+							if client.username == username {
 								client.send<-message
 							}
 						}
-						//TODO: add to queue
+						addMessageToDatabase(db,msg)
 					}else if msg.From.Key == key {
-						if msg.From.Name+"@"+msg.From.Domain == c.username {
-							//TODO: add to queue
+						if c.username == username {
+							addMessageToDatabase(msg)
 							c.send<-message
-							sendMessage(msg)
+							sendMessage(db,msg)
 						}
 					}
+				}
+				err=rows.Err()
+				if err != nil {
+					fmt.Println(err)
+					continue
 				}
 			}
 		}
 	}
+}
+func addMessageToDatabase(db *sql.DB,msg *Message){
+msg.From
+msg.To
 }
 func (c *Client) writePump() {
 	ticker := time.NewTicker(54*time.Second)
@@ -166,7 +234,7 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize: 1024,
 	WriteBufferSize: 1024,
 }
-func serveWebsocket(tracker *Tracker, w http.ResponseWriter, r *http.Request) {
+func serveWebsocket(db *sql.DB,tracker *Tracker, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w,r,nil)
 	if err != nil {
 		fmt.Println(err)
@@ -175,7 +243,7 @@ func serveWebsocket(tracker *Tracker, w http.ResponseWriter, r *http.Request) {
 	client := &Client{tracker: tracker,conn: conn,send: make(chan []byte, 256)}
 	client.tracker.register <- client
 	go client.writePump()
-	client.readPump()
+	client.readPump(db)
 }
 func sendMessage(msg* Message) (bool) {
 	var data,_=json.Marshal(msg)

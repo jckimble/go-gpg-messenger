@@ -22,6 +22,7 @@ type Message struct {
 	To* Email
 	Message string
 	Time int
+	Type string
 }
 func parseMessage(str string) (*Message) {
 	var msg = new(Message)

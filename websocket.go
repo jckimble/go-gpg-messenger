@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"encoding/json"
 	"time"
+	"strings"
 	"net/http"
 	"database/sql"
 	_ "github.com/mattn/go-sqlite3"
@@ -80,7 +81,8 @@ func (c *Client) readPump(db *sql.DB){
 		auth := new(UserAuth)
 		authErr := json.Unmarshal([]byte(message),auth)
 		if authErr == nil {
-			rows, err := db.Query("SELECT password FROM users WHERE username=?", auth.Username)
+			spt := strings.Split(auth.Username,"@")
+			rows, err := db.Query("SELECT password FROM users WHERE name=? AND domain=? AND password!=''", spt[0], spt[1])
 			if err != nil {
 				status:=new(Status)
 				status.Error=true
@@ -152,7 +154,7 @@ func (c *Client) readPump(db *sql.DB){
 		if msg != nil {
 			if checkMessage(msg) {
 				//TODO: allow multchat
-				rows, err := db.Query("SELECT username,key FROM users WHERE username=? OR username=?", msg.From.Name+"@"+msg.From.Domain, msg.To.Name+"@"+msg.To.Domain)
+				rows, err := db.Query("SELECT name,domain,key FROM users WHERE (name=? AND domain=?) OR (name=? AND domain=?)", msg.From.Name, msg.From.Domain, msg.To.Name, msg.To.Domain)
 				if err != nil {
 					fmt.Println(err)
 					continue
@@ -160,24 +162,25 @@ func (c *Client) readPump(db *sql.DB){
 				defer rows.Close()
 				for rows.Next() {
 					var key string
-					var username string
-					err := rows.Scan(&username,&key)
+					var name string
+					var domain string
+					err := rows.Scan(&name,&domain,&key)
 					if err != nil {
 						fmt.Println(err)
 						continue
 					}
 					if msg.To.Key == key {
 						for client,_ := range c.tracker.clients{
-							if client.username == username {
+							if client.username == name+"@"+domain {
 								client.send<-message
 							}
 						}
 						addMessageToDatabase(db,msg)
 					}else if msg.From.Key == key {
-						if c.username == username {
-							addMessageToDatabase(msg)
+						if c.username == name+"@"+domain {
+							addMessageToDatabase(db,msg)
 							c.send<-message
-							sendMessage(db,msg)
+							sendMessage(msg)
 						}
 					}
 				}
@@ -191,8 +194,20 @@ func (c *Client) readPump(db *sql.DB){
 	}
 }
 func addMessageToDatabase(db *sql.DB,msg *Message){
-msg.From
-msg.To
+	_, err := db.Exec("INSERT IF NOT EXISTS INTO users(`name`,`domain`,`key`,`port`) VALUES(?,?,?,?)",msg.To.Name,msg.To.Domain,msg.To.Key,msg.To.Port)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	_, err = db.Exec("INSERT IF NOT EXISTS INTO users(`name`,`domain`,`key`,`port`) VALUES(?,?,?,?)",msg.From.Name,msg.From.Domain,msg.From.Key,msg.From.Port)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	_, err = db.Exec("INSERT INTO messages(`to`,`from`,`time`,`type`,`message`) VALUES(SELECT id FROM `users` WHERE name=? AND domain=? AND key=? AND port=?,SELECT id FROM `users` WHERE name=? AND domain=? AND key=? AND port=?,?,?,?)",msg.To.Name,msg.To.Domain,msg.To.Key,msg.To.Port,msg.From.Name,msg.From.Domain,msg.From.Key,msg.From.Port,msg.Time,msg.Type,msg.Message)
+	if err != nil {
+		fmt.Println(err)
+	}
 }
 func (c *Client) writePump() {
 	ticker := time.NewTicker(54*time.Second)

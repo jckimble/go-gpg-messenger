@@ -24,6 +24,32 @@ func main(){
 		fmt.Println(err)
 		return
 	}
+	_,err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
+		id INTEGER UNSIGNED NOT NULL AUTO_INCREMENT,
+		name VARCHAR(255),
+		domain VARCHAR(255),
+		password VARCHAR(255),
+		key VARCHAR(16),
+		port INTEGER UNSIGNED NOT NULL,
+		PRIMARY KEY (id)
+	)`)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	_,err = db.Exec(`CREATE TABLE IF NOT EXISTS messages (
+		id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+		to INT UNSIGNED NOT NULL,
+		from INT UNSIGNED NOT NULL,
+		time INT UNSIGNED NOT NULL,
+		type VARCHAR(255),
+		message longtext NULL,
+		PRIMARY KEY (id)
+	)`)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 	defer db.Close()
 	tracker := newTracker()
 	go tracker.run()

@@ -4,3 +4,6 @@ client
 server
 .env
 ggm.db
+gpm.db
+gpm.json
+*.swp

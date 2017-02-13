@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"database/sql"
 	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
+	"github.com/spf13/viper"
 )
 func serveHome(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -18,14 +21,20 @@ func serveHome(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("location","/ws")
 }
 const (
-	MySQL = iota
+	None = iota
+	MySQL
 	Postgres
 	SQLite
 )
 var driver = map[int]string{
-	0: "mysql",
-	1: "postgres",
-	2: "sqlite3",
+	MySQL: "mysql",
+	Postgres: "postgres",
+	SQLite: "sqlite3",
+}
+var configDriver = map[string]int{
+	"mysql": MySQL,
+	"postgres": Postgres,
+	"sqlite": SQLite,
 }
 var CREATEUSERS = map[int]string{
 	MySQL: "CREATE TABLE IF NOT EXISTS users (id INT UNSIGNED NOT NULL AUTO_INCREMENT, name VARCHAR(255), domain VARCHAR(255), password VARCHAR(255), key VARCHAR(16), port INT UNSIGNED NOT NULL, PRIMARY KEY (id))",
@@ -38,18 +47,47 @@ var CREATEMESSAGES = map[int]string{
 	SQLite: "CREATE TABLE IF NOT EXISTS messages (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `to` INTEGER UNSIGNED NOT NULL, `from` INTEGER UNSIGNED NOT NULL, `time` INTEGER UNSIGNED NOT NULL, `type` VARCHAR(255), `message` longtext NULL)",
 }
 func main(){
-	//TODO: add multible database options
-	db,err:=sql.Open(driver[SQLite],"./ggm.db")
+	viper.SetConfigName("gpm")
+	viper.AddConfigPath("/etc/")
+	viper.AddConfigPath("/etc/gpm/")
+	viper.AddConfigPath("$HOME/.gpm")
+	viper.AddConfigPath(".")
+	viper.SetDefault("port",8080)
+	viper.SetDefault("database.Type","sqlite")
+	viper.SetDefault("database.File","./gpm.db")
+	err := viper.ReadInConfig()
+	if err != nil {
+		fmt.Println("No configuration file found - using defaults")
+	}
+
+	dbType := configDriver[viper.GetString("database.Type")]
+	var source string
+	if dbType == SQLite {
+		source = viper.GetString("database.File")
+	}else if dbType == Postgres {
+		source = fmt.Sprintf("postgres://%s:%s@%s:%d/%s",viper.GetString("database.Username"),viper.GetString("database.Password"),viper.GetString("database.Hostname"),viper.GetInt("database.Port"),viper.GetString("database.Database"))
+	}else if dbType == MySQL {
+		if viper.GetString("database.Socket") != "" {
+			source = fmt.Sprintf("%s:%s@unix(%s)/%s",viper.GetString("database.Username"),viper.GetString("database.Password"),viper.GetString("database.Socket"),viper.GetString("database.Database"))
+		}else{
+			viper.SetDefault("database.Port",3306)
+			source = fmt.Sprintf("%s:%s@tcp(%s:%d)/%s",viper.GetString("database.Username"),viper.GetString("database.Password"),viper.GetString("database.Hostname"),viper.GetInt("database.Port"),viper.GetString("database.Database"))
+		}
+	}else{
+		fmt.Println("Unreconized Database Type")
+		return
+	}
+	db,err:=sql.Open(driver[dbType],source)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	_,err = db.Exec(CREATEUSERS[SQLite])
+	_,err = db.Exec(CREATEUSERS[dbType])
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	_,err = db.Exec(CREATEMESSAGES[SQLite])
+	_,err = db.Exec(CREATEMESSAGES[dbType])
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -61,7 +99,7 @@ func main(){
 	http.HandleFunc("/ws",func(w http.ResponseWriter, r *http.Request) {
 		serveWebsocket(db,tracker,w,r)
 	})
-	err = http.ListenAndServe(":8080",nil)
+	err = http.ListenAndServe(fmt.Sprintf(":%d",viper.GetInt("port")),nil)
 	if err != nil {
 		fmt.Println(err)
 	}

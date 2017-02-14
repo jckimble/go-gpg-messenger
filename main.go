@@ -4,6 +4,11 @@ import (
 	"fmt"
 	"net/http"
 	"database/sql"
+	"os"
+	"log"
+	"os/signal"
+	"syscall"
+	"github.com/miekg/dns"
 	_ "github.com/mattn/go-sqlite3"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
@@ -53,11 +58,13 @@ func main(){
 	viper.AddConfigPath("$HOME/.gpm")
 	viper.AddConfigPath(".")
 	viper.SetDefault("port",8080)
+	viper.SetDefault("dns.enabled",true)
+	viper.SetDefault("dns.port",5353)
 	viper.SetDefault("database.Type","sqlite")
 	viper.SetDefault("database.File","./gpm.db")
 	err := viper.ReadInConfig()
 	if err != nil {
-		fmt.Println("No configuration file found - using defaults")
+		log.Println("No configuration file found - using defaults")
 	}
 
 	dbType := configDriver[viper.GetString("database.Type")]
@@ -74,22 +81,21 @@ func main(){
 			source = fmt.Sprintf("%s:%s@tcp(%s:%d)/%s",viper.GetString("database.Username"),viper.GetString("database.Password"),viper.GetString("database.Hostname"),viper.GetInt("database.Port"),viper.GetString("database.Database"))
 		}
 	}else{
-		fmt.Println("Unreconized Database Type")
-		return
+		log.Fatalf("Unreconized Database Type")
 	}
 	db,err:=sql.Open(driver[dbType],source)
 	if err != nil {
-		fmt.Println(err)
+		log.Fatalf("Unable To Connect To Database: %s",err)
 		return
 	}
 	_,err = db.Exec(CREATEUSERS[dbType])
 	if err != nil {
-		fmt.Println(err)
+		log.Fatalf("Unable To Create Users Table: %s",err)
 		return
 	}
 	_,err = db.Exec(CREATEMESSAGES[dbType])
 	if err != nil {
-		fmt.Println(err)
+		log.Fatalf("Unable To Create Messages Table: %s",err)
 		return
 	}
 	defer db.Close()
@@ -99,8 +105,32 @@ func main(){
 	http.HandleFunc("/ws",func(w http.ResponseWriter, r *http.Request) {
 		serveWebsocket(db,tracker,w,r)
 	})
-	err = http.ListenAndServe(fmt.Sprintf(":%d",viper.GetInt("port")),nil)
-	if err != nil {
-		fmt.Println(err)
+	go func(){
+		err := http.ListenAndServe(fmt.Sprintf(":%d",viper.GetInt("port")),nil)
+		if err != nil {
+			log.Fatalf("Unable To Listen on port %d for websocket: ",viper.GetInt("port"),err)
+		}
+	}()
+	if viper.GetBool("dns.enabled") {
+		go func(){
+			err := dns.ListenAndServe(fmt.Sprintf(":%d",viper.GetInt("dns.port")),"tcp",nil)
+			if err != nil {
+				log.Fatalf("Unable To Listen on port %d/tcp for dns server: ",viper.GetInt("dns.port"),err)
+			}
+		}()
+		go func(){
+			err := dns.ListenAndServe(fmt.Sprintf(":%d",viper.GetInt("dns.port")),"udp",nil)
+			if err != nil {
+				log.Fatalf("Unable To Listen on port %d/udp for dns server: ",viper.GetInt("dns.port"),err)
+			}
+		}()
+	}
+	sig := make(chan os.Signal)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	for {
+		select {
+		case s := <-sig:
+			log.Fatalf("Signal (%d) received, stopping\n",s)
+		}
 	}
 }

@@ -7,6 +7,7 @@ depends:
 	go get github.com/mattn/go-sqlite3
 	go get github.com/go-sql-driver/mysql
 	go get github.com/lib/pq
+	go get github.com/miekg/dns
 	go get github.com/spf13/viper
 server: main.go dns.go messages.go websocket.go
 	go build -o $@ $^

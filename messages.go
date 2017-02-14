@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"fmt"
+	"log"
 	"encoding/json"
 	"golang.org/x/crypto/openpgp/armor"
 	"golang.org/x/crypto/openpgp/packet"
@@ -46,7 +47,7 @@ func checkMessage(msg* Message) (bool) {
 	for {
 		p, err = packets.Next()
 		if err != nil{
-			fmt.Printf(err.Error())
+			log.Printf("Error Reading PGP Message Packet: %s",err.Error())
 			break ParsePackets
 		}
 		switch p := p.(type) {

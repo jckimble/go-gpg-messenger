@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"bytes"
 	"strconv"
 	"net/url"
@@ -72,7 +72,7 @@ func (c *Client) readPump(db *sql.DB){
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err,websocket.CloseGoingAway){
-				fmt.Println(err)
+				log.Printf("Unexpected Websocket Close Error: %s",err)
 			}
 			break
 		}
@@ -89,7 +89,7 @@ func (c *Client) readPump(db *sql.DB){
 				status.Message="Unable to login"
 				json,_:=json.Marshal(status)
 				c.send<-json
-				fmt.Println(err)
+				log.Printf("SQL Error: %s",err)
 				continue
 			}
 			defer rows.Close()
@@ -102,7 +102,7 @@ func (c *Client) readPump(db *sql.DB){
 					status.Message="Unable to login"
 					json,_:=json.Marshal(status)
 					c.send<-json
-					fmt.Println(err)
+					log.Printf("SQL Error: %s",err)
 					continue
 				}
 				err = bcrypt.CompareHashAndPassword([]byte(password),[]byte(auth.Password))
@@ -112,7 +112,7 @@ func (c *Client) readPump(db *sql.DB){
 					status.Message="Unable to login"
 					json,_:=json.Marshal(status)
 					c.send<-json
-					fmt.Println(err)
+					log.Printf("Password Error: %s",err)
 					continue
 				}
 			}
@@ -123,7 +123,7 @@ func (c *Client) readPump(db *sql.DB){
 				status.Message="Unable to login"
 				json,_:=json.Marshal(status)
 				c.send<-json
-				fmt.Println(err)
+				log.Printf("SQL Error: %s",err)
 				continue
 			}
 			c.username=auth.Username
@@ -156,7 +156,7 @@ func (c *Client) readPump(db *sql.DB){
 				//TODO: allow multchat
 				rows, err := db.Query("SELECT name,domain,key FROM users WHERE (name=? AND domain=?) OR (name=? AND domain=?)", msg.From.Name, msg.From.Domain, msg.To.Name, msg.To.Domain)
 				if err != nil {
-					fmt.Println(err)
+					log.Printf("SQL Error: %s",err)
 					continue
 				}
 				defer rows.Close()
@@ -166,7 +166,7 @@ func (c *Client) readPump(db *sql.DB){
 					var domain string
 					err := rows.Scan(&name,&domain,&key)
 					if err != nil {
-						fmt.Println(err)
+						log.Printf("SQL Error: %s",err)
 						continue
 					}
 					if msg.To.Key == key {
@@ -186,7 +186,7 @@ func (c *Client) readPump(db *sql.DB){
 				}
 				err=rows.Err()
 				if err != nil {
-					fmt.Println(err)
+					log.Printf("SQL Error: %s",err)
 					continue
 				}
 			}
@@ -196,17 +196,17 @@ func (c *Client) readPump(db *sql.DB){
 func addMessageToDatabase(db *sql.DB,msg *Message){
 	_, err := db.Exec("INSERT IF NOT EXISTS INTO users(`name`,`domain`,`key`,`port`) VALUES(?,?,?,?)",msg.To.Name,msg.To.Domain,msg.To.Key,msg.To.Port)
 	if err != nil {
-		fmt.Println(err)
+		log.Printf("SQL Error: %s",err)
 		return
 	}
 	_, err = db.Exec("INSERT IF NOT EXISTS INTO users(`name`,`domain`,`key`,`port`) VALUES(?,?,?,?)",msg.From.Name,msg.From.Domain,msg.From.Key,msg.From.Port)
 	if err != nil {
-		fmt.Println(err)
+		log.Printf("SQL Error: %s",err)
 		return
 	}
 	_, err = db.Exec("INSERT INTO messages(`to`,`from`,`time`,`type`,`message`) VALUES(SELECT id FROM `users` WHERE name=? AND domain=? AND key=? AND port=?,SELECT id FROM `users` WHERE name=? AND domain=? AND key=? AND port=?,?,?,?)",msg.To.Name,msg.To.Domain,msg.To.Key,msg.To.Port,msg.From.Name,msg.From.Domain,msg.From.Key,msg.From.Port,msg.Time,msg.Type,msg.Message)
 	if err != nil {
-		fmt.Println(err)
+		log.Printf("SQL Error: %s",err)
 	}
 }
 func (c *Client) writePump() {
@@ -252,7 +252,7 @@ var upgrader = websocket.Upgrader{
 func serveWebsocket(db *sql.DB,tracker *Tracker, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w,r,nil)
 	if err != nil {
-		fmt.Println(err)
+		log.Printf("Websocket Upgrade Error: %s",err)
 		return
 	}
 	client := &Client{tracker: tracker,conn: conn,send: make(chan []byte, 256)}
@@ -265,14 +265,14 @@ func sendMessage(msg* Message) (bool) {
 	u:=url.URL{Scheme: "ws",Host:msg.To.Domain+":"+strconv.Itoa(msg.To.Port), Path:"/ws"}
 	c, _, err := websocket.DefaultDialer.Dial(u.String(),nil)
 	if err != nil {
-		fmt.Printf(err.Error())
+		log.Printf("Unable To Connect: %s",err.Error())
 		return false
 	}
 	defer c.Close()
 
 	err = c.WriteMessage(websocket.TextMessage,data)
 	if err != nil {
-		fmt.Printf(err.Error())
+		log.Printf("Unable To Send Message: %s",err.Error())
 		return false
 	}
 	c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))

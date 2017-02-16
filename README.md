@@ -11,15 +11,16 @@ $ ./server
 
 ### Todos (What needs to be done before I consider this a 1.0 release)
  - Write Tests
- - Add Database Message Storage
  - Add status messages to websocket
- - Add Credentials to Database
+ - Read Notifications
  - Add MultiChat
  - Finish Shell Client
- - Add Configuration from files and commandline
- - Add optional dns server
- - Maybe add optional smtp proxy to bridge gap between users and the rest of the world
  - Create React Native App
+
+### Random Thoughts (Up for discussion)
+ - optional smtp proxy to bridge gap between users and the rest of the world
+ - Epithermal Messages (Only Stored in Database Until Downloaded)
+ - Auto-Delete Timer for Messages
 
 ### License
 MIT

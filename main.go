@@ -112,6 +112,10 @@ func main(){
 		}
 	}()
 	if viper.GetBool("dns.enabled") {
+		viper.SetDefault("dns.domain","example.com")
+		dns.HandleFunc(".",func(w dns.ResponseWriter, r *dns.Msg){
+			serveDNSRequest(db,w,r)
+		})
 		go func(){
 			err := dns.ListenAndServe(fmt.Sprintf(":%d",viper.GetInt("dns.port")),"tcp",nil)
 			if err != nil {

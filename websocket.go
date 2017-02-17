@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/gorilla/websocket"
+	"github.com/spf13/viper"
 	"golang.org/x/crypto/bcrypt"
 )
 type Status struct {
@@ -77,6 +78,25 @@ func (c *Client) readPump(db *sql.DB){
 			break
 		}
 		message = bytes.TrimSpace(bytes.Replace(message,[]byte{'\n'},[]byte{' '},-1))
+		//Register
+		viper.SetDefault("allowRegistration",true)
+		if viper.GetBool("allowRegistration") {
+			reg := new(Register)
+			regErr:=json.Unmarshal([]byte(message),reg)
+			if regErr == nil {
+				pass,_:= bcrypt.GenerateFromPassword([]byte(reg.Password),12)
+				_, err:=db.Exec("INSERT INTO users(`name`,`domain`,`password`,`key`) VALUES(?,?,?,?)",reg.Username,reg.Domain,pass,reg.Key)
+				if err != nil {
+					status:=new(Status)
+					status.Error=true
+					status.Message="Unable To Register Account"
+					json,_:=json.Marshal(status)
+					c.send<-json
+					log.Printf("SQL Error: %s",err)
+					continue
+				}
+			}
+		}
 		//Authorize
 		auth := new(UserAuth)
 		authErr := json.Unmarshal([]byte(message),auth)
@@ -156,6 +176,11 @@ func (c *Client) readPump(db *sql.DB){
 				//TODO: allow multchat
 				rows, err := db.Query("SELECT name,domain,key FROM users WHERE (name=? AND domain=?) OR (name=? AND domain=?)", msg.From.Name, msg.From.Domain, msg.To.Name, msg.To.Domain)
 				if err != nil {
+					status:=new(Status)
+					status.Error=true
+					status.Message="Send Failed"
+					json,_:=json.Marshal(status)
+					c.send<-json
 					log.Printf("SQL Error: %s",err)
 					continue
 				}

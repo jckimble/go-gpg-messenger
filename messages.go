@@ -12,6 +12,12 @@ type UserAuth struct {
 	Username string
 	Password string
 }
+type Register struct {
+	Username string
+	Domain string
+	Password string
+	Key string
+}
 type Email struct {
 	Name string
 	Domain string
